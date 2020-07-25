@@ -1,0 +1,140 @@
+---
+title: "Using Activity Tracker Data to Study Exercise Techniques"
+author: "Aditya Iyengar"
+date: "15/04/2020"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+## Introduction
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit, it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the **quantified self movement** – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify *how much* of a particular activity they do, but they rarely quantify *how well* they do it. In this project, we have with us data from accelerometers on the belt, forearm, arm, and dumb-bell of 6 participants. They were asked to perform bar-bell lifts correctly and incorrectly in 5 different ways. More information is available from the website [here](http://groupware.les.inf.puc-rio.br/har) (see the section on the Weight Lifting Exercise Dataset).
+  
+## Objective
+The goal of the project is to predict the manner in which the people did the exercise. This is the "classe" variable in the training set. The prediction model will be used to predict 20 different test cases.  
+
+## Preliminaries
+Let us load the training and test datasets.  
+```{r}
+training <- read.csv("pml-training.csv")
+test <- read.csv("pml-testing.csv")
+```
+Here are the dimensions of the training dataset.  
+```{r}
+dim(training)
+```
+  
+We observe that there are several columns with majorly missing observations. We will eject these columns from the training and test sets. Also, the first seven rows contain the information about the people who participated in the tests, which is not relevant to the task. Hence, we eject these rows.  
+```{r}
+missingindex <- which(colSums(is.na(training) |training=="")>0.9*dim(training)[1]) 
+training <- training[,-missingindex]
+training <- training[,-c(1:7)]
+missingindex2 <- which(colSums(is.na(test) |test=="")>0.9*dim(test)[1])
+test <- test[, -missingindex2]
+test <- test[, -c(1:7)]
+```
+  
+Let us now view a brief summary of the training dataset.  
+```{r}
+str(training)
+```
+  
+We now partition our training dataset into separate training and test datasets.
+```{r}
+library(caret)
+set.seed(11111)
+inTrain <- createDataPartition(training$classe, p=0.7, list=FALSE)
+traindata <- training[inTrain,]
+testdata <- training[-inTrain,]
+dim(traindata)
+dim(testdata)
+```
+  
+## Training
+We use **Decision Trees**, **Random Forests**, **Gradient Boosting** and **Support Vector Machines** as the training algorithms. We compare the accuracies on the test component of the training data and choose the best method to be applied on the test data. Across the algorithms, we use **10-fold cross-validation** to limit the effects of overfitting and improve the efficiency of the models.  
+  
+### Decision Tree
+```{r}
+library(rattle)
+crossvalidation <- trainControl(method="cv", number=5)
+model_dt <- train(classe ~ ., data = traindata, method = "rpart", trControl = crossvalidation)
+pred_dt <- predict(model_dt, newdata = testdata)
+conf_dt <- confusionMatrix(testdata$classe, pred_dt)
+conf_dt$table
+conf_dt$overall
+fancyRpartPlot(model_dt$finalModel)
+```
+  
+  
+The accuracy obtained is **under 50%** and is extremely unsatisfactory. It would not be acceptable to use this model for further predictions.  
+  
+### Random Forest
+```{r}
+library(randomForest)
+model_rf <- train(classe ~ ., data = traindata, method = "rf", trControl = crossvalidation, verbose = FALSE)
+pred_rf <- predict(model_rf, testdata)
+conf_rf <- confusionMatrix(testdata$classe, pred_rf)
+conf_rf$table
+conf_rf$overall
+plot(model_rf$finalModel, main="Effect of Number of Trees on Prediction Error")
+plot(model_rf, main="Effect of Number of Predictors on Cross-Validation Accuracy")
+```
+  
+  
+The accuracy obtained is **over 99%**, hence this appears to be an excellent predictor.
+  
+We also see that the error in the model reduces rapidly until the number of trees are around 30. Increasing the number of trees further doesn't have a major increment in the accuracy.
+  
+The optimal number of predictors can be anywhere from 2 to around 25. Increasing the number of predictors further reduces the accuracy, suggesting that there may be interdependent predictors that may be strongly correlated.
+  
+### Gradient Boosting
+```{r}
+model_gb <- train(classe ~ ., data = training, method = "gbm", trControl = crossvalidation, verbose=FALSE)
+pred_gb <- predict(model_gb, testdata)
+conf_gb <- confusionMatrix(testdata$classe, pred_gb)
+conf_gb$table
+conf_rf$overall
+plot(model_gb, main = "Effect of Maximum Tree Depth on Cross-Validation Accuracy")
+```
+  
+  
+The accuracy obtained with a maximum tree depth of 3 and 10-fold cross validation is **around 96%**, which is pretty good, but inferior to that obtained by the Random Forest.
+  
+### Support Vector Machine
+```{r}
+library(e1071)
+model_svm <- svm(classe~., data = traindata, type = "C-classification", kernel = "radial", cost = 5, cross = 10)
+pred_svm <- predict(model_svm, testdata)
+conf_svm <- confusionMatrix(testdata$classe, pred_svm)
+conf_svm$table
+conf_svm$overall
+```
+  
+  
+The accuracy obtained is **around 80%**, which, while not dismal by itself, stands no chance against the accuracy of the Random Forest model.  
+Thus we choose the **Random Forest** algorithm for the final testing.
+  
+## Testing
+We test our Random Forest model against the unseen test data that consists of 20 rows of observations.  
+```{r}
+predict(model_rf, test)
+plot(predict(model_rf, test), main = "Test Results", ylab = "Count", xlab = "Exercise Activity", col = "steelblue")
+```
+  
+  
+Interestingly, our SVM and GB models also give identical results as can be seen below. However the results of the Decision tree are quite some way off.
+```{r}
+predict(model_svm, test)
+predict(model_gb, test)
+predict(model_dt, test)
+```
+  
+## Conclusion
+Random forests are extremely accurate predictors and can be used to model large volumes of data. The given test samples appear to be conservative as the results from the lesser accurate Gradient Boosting and SVM algorithms mimic those from the highly accurate Random Forest.  
+10-fold cross-validation was used to minimize the effect of overfitting without compromising on the length of the datasets. Often, it may be advisable to omit covariates that are highly correlated in favour of obtaining better accuracies.  
+  
+## References
+Velloso, E.; Bulling, A.; Gellersen, H.; Ugulino, W.; Fuks, H. [Qualitative Activity Recognition of Weight Lifting Exercises](http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/work.jsf?p1=11201) - Proceedings of 4th International Conference in Cooperation with SIGCHI (Augmented Human '13), Stuttgart, Germany: ACM SIGCHI, 2013.  
+  
+
+------
